@@ -1,0 +1,586 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===== HR ENUMS =====
+enum CompanyUserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum AbsenceType {
+  VACATION
+  SICK_LEAVE
+  OTHER
+}
+
+enum AbsenceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  PAYROLL
+  CONTRACT
+  OTHER
+}
+
+enum PettyCashStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String   @unique
+  name      String?
+  surname   String?
+  avatar       String?
+  googleId     String   @unique @map("google_id")
+  tokenVersion Int      @default(1) @map("token_version")
+  phone         String?  @unique @map("phone")
+  phoneVerified Boolean  @default(false) @map("phone_verified")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  companyUsers       CompanyUser[]
+  teamUsers          TeamUser[]
+  createdInvitations Invitation[]      @relation("CreatedInvitations")
+  invitationUses     InvitationUse[]
+  taskAssignments    TaskAssignment[]
+  clockEntries       ClockEntry[]
+  refreshTokens      RefreshToken[]
+  trustedDevices     TrustedDevice[]
+  loginHistory       LoginHistory[]
+  securityAlerts     SecurityAlert[]
+  otpCodes           OtpCode[]
+
+  @@map("users")
+}
+
+model Company {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  companyUsers      CompanyUser[]
+  contacts          Contact[]        @relation("CompanyContacts")
+  contactReferences Contact[]        @relation("ContactCompany")
+  teams             Team[]
+  teamUsers         TeamUser[]
+  projects          Project[]
+  invitations       Invitation[]
+  workingOrders     WorkingOrder[]
+  taskCategories    TaskCategory[]
+  taskDetails       TaskDetail[]
+  tasks             Task[]
+  clockEntries      ClockEntry[]
+  hrAbsences        HrAbsence[]
+  documents         Document[]
+  pettyCashExpenses PettyCash[]
+
+  @@map("companies")
+}
+
+model CompanyUser {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // HR Fields
+  role        CompanyUserRole @default(EMPLOYEE)
+  managerId   String?         @map("manager_id") @db.Uuid
+  jobTitle    String?         @map("job_title")
+  department  String?
+  joiningDate DateTime?       @map("joining_date") @db.Date
+  bankAccount String?         @map("bank_account")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  manager   CompanyUser? @relation("ManagerHierarchy", fields: [managerId], references: [id], onDelete: SetNull)
+  
+  teamUsers     TeamUser[]
+  directReports CompanyUser[] @relation("ManagerHierarchy")
+  hrAbsences    HrAbsence[]
+  documents     Document[]
+  pettyCashExpenses PettyCash[]
+
+  @@unique([userId, companyId], name: "company_users_unique")
+  @@index([managerId], name: "idx_company_users_manager_id")
+  @@map("company_users")
+}
+
+model Contact {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  contactCompanyId String?  @map("contact_company_id") @db.Uuid
+  contactName      String   @map("contact_name")
+  isActiveContact  Boolean  @default(true) @map("is_active_contact")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company        Company        @relation("CompanyContacts", fields: [companyId], references: [id], onDelete: Cascade)
+  contactCompany Company?       @relation("ContactCompany", fields: [contactCompanyId], references: [id], onDelete: SetNull)
+  projects       Project[]
+  workingOrders  WorkingOrder[]
+  taskDetails    TaskDetail[]
+  tasks          Task[]
+
+  @@map("contacts")
+}
+
+model Team {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  code      String
+  color     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  teamUsers       TeamUser[]
+  taskAssignments TaskAssignment[]
+
+  @@map("teams")
+}
+
+model TeamUser {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  teamId    String   @map("team_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyUser CompanyUser @relation(fields: [userId, companyId], references: [userId, companyId], onDelete: Cascade)
+
+  @@unique([companyId, userId], name: "team_users_one_team_per_company")
+  @@map("team_users")
+}
+
+model Project {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  contactId   String   @map("contact_id") @db.Uuid
+  name        String
+  description String?
+  status      String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact        @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  workingOrders WorkingOrder[]
+  taskDetails   TaskDetail[]
+  tasks         Task[]
+
+  @@map("projects")
+}
+
+model Invitation {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId       String    @map("company_id") @db.Uuid
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  code            String    @unique @db.VarChar(32)
+  maxUses         Int?      @map("max_uses")
+  currentUses     Int       @default(0) @map("current_uses")
+  expiresAt       DateTime? @map("expires_at") @db.Timestamptz(6)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy      User            @relation("CreatedInvitations", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  invitationUses InvitationUse[]
+
+  @@index([companyId], name: "idx_invitations_company_id")
+  @@index([code], name: "idx_invitations_code")
+  @@index([createdByUserId], name: "idx_invitations_created_by")
+  @@index([isActive, expiresAt], name: "idx_invitations_active")
+  @@map("invitations")
+}
+
+model InvitationUse {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invitationId String   @map("invitation_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  usedAt       DateTime @default(now()) @map("used_at") @db.Timestamptz(6)
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent")
+
+  invitation Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([invitationId], name: "idx_invitation_uses_invitation_id")
+  @@index([userId], name: "idx_invitation_uses_user_id")
+  @@map("invitation_uses")
+}
+
+model WorkingOrder {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  contactId String   @map("contact_id") @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  title     String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact     Contact      @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskDetails TaskDetail[]
+  tasks       Task[]
+
+  @@index([companyId], name: "idx_working_orders_company_id")
+  @@index([projectId], name: "idx_working_orders_project_id")
+  @@map("working_orders")
+}
+
+model TaskCategory {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  code      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  taskDetails TaskDetail[]
+  tasks       Task[]
+
+  @@unique([companyId, code], name: "task_categories_company_code_unique")
+  @@index([companyId], name: "idx_task_categories_company_id")
+  @@map("task_categories")
+}
+
+model TaskDetail {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  contactId      String   @map("contact_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  workingOrderId String   @map("working_order_id") @db.Uuid
+  categoryId     String?  @map("category_id") @db.Uuid
+  categoryName   String   @map("category_name")
+  title          String
+  instructions   String[]
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact      Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workingOrder WorkingOrder  @relation(fields: [workingOrderId], references: [id], onDelete: Cascade)
+  category     TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tasks        Task[]
+
+  @@index([companyId], name: "idx_task_details_company_id")
+  @@index([workingOrderId], name: "idx_task_details_working_order_id")
+  @@map("task_details")
+}
+
+model Task {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId       String    @map("company_id") @db.Uuid
+  contactId       String    @map("contact_id") @db.Uuid
+  projectId       String    @map("project_id") @db.Uuid
+  workingOrderId  String    @map("working_order_id") @db.Uuid
+  taskDetailId    String    @map("task_detail_id") @db.Uuid
+  categoryId      String?   @map("category_id") @db.Uuid
+  categoryName    String    @map("category_name")
+  taskDetailTitle String    @map("task_detail_title")
+  instructions    String[]
+  instructionsCompleted Boolean[] @default([]) @map("instructions_completed")
+  scheduleEnabled Boolean   @default(false) @map("schedule_enabled")
+  shiftType       String?   @map("shift_type")
+  scheduledDate   DateTime? @map("scheduled_date") @db.Date
+  startTime       String?   @map("start_time")
+  endTime         String?   @map("end_time")
+  isRepeating     Boolean   @default(false) @map("is_repeating")
+  repeatFrequency String?   @map("repeat_frequency")
+  repeatEndDate   DateTime? @map("repeat_end_date") @db.Date
+  status          String    @default("open")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact      Contact          @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workingOrder WorkingOrder     @relation(fields: [workingOrderId], references: [id], onDelete: Cascade)
+  taskDetail   TaskDetail       @relation(fields: [taskDetailId], references: [id], onDelete: Cascade)
+  category     TaskCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  assignments  TaskAssignment[]
+  clockEntries ClockEntry[]
+
+  @@index([companyId], name: "idx_tasks_company_id")
+  @@index([projectId], name: "idx_tasks_project_id")
+  @@index([workingOrderId], name: "idx_tasks_working_order_id")
+  @@index([taskDetailId], name: "idx_tasks_task_detail_id")
+  @@index([scheduledDate], name: "idx_tasks_scheduled_date")
+  @@index([status], name: "idx_tasks_status")
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId         String   @map("task_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  teamId         String?  @map("team_id") @db.Uuid
+  userName       String?  @map("user_name")
+  userSurname    String?  @map("user_surname")
+  userEmail      String   @map("user_email")
+  teamName       String?  @map("team_name")
+  teamCode       String?  @map("team_code")
+  teamColor      String?  @map("team_color")
+  assignmentType String   @map("assignment_type")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  task Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@unique([taskId, userId], name: "task_assignments_task_user_unique")
+  @@index([taskId], name: "idx_task_assignments_task_id")
+  @@index([userId], name: "idx_task_assignments_user_id")
+  @@map("task_assignments")
+}
+
+model ClockEntry {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId       String    @map("company_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  taskId          String    @map("task_id") @db.Uuid
+  clockInTime     DateTime  @map("clock_in_time") @db.Timestamptz(6)
+  clockInLat      Float?    @map("clock_in_lat")
+  clockInLng      Float?    @map("clock_in_lng")
+  clockInAddress  String?   @map("clock_in_address")
+  clockOutTime    DateTime? @map("clock_out_time") @db.Timestamptz(6)
+  clockOutLat     Float?    @map("clock_out_lat")
+  clockOutLng     Float?    @map("clock_out_lng")
+  clockOutAddress String?   @map("clock_out_address")
+  durationMinutes Int?      @map("duration_minutes")
+  notes           String?
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task            Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  locationHistory ClockLocation[]
+
+  @@index([companyId], name: "idx_clock_entries_company_id")
+  @@index([userId], name: "idx_clock_entries_user_id")
+  @@index([taskId], name: "idx_clock_entries_task_id")
+  @@index([clockInTime], name: "idx_clock_entries_clock_in_time")
+  @@index([isActive], name: "idx_clock_entries_is_active")
+  @@index([userId, isActive], name: "idx_clock_entries_user_active")
+  @@map("clock_entries")
+}
+
+model ClockLocation {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clockEntryId String   @map("clock_entry_id") @db.Uuid
+  latitude     Float
+  longitude    Float
+  accuracy     Float?
+  altitude     Float?
+  speed        Float?
+  heading      Float?
+  timestamp    DateTime @db.Timestamptz(6)
+  address      String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  clockEntry ClockEntry @relation(fields: [clockEntryId], references: [id], onDelete: Cascade)
+
+  @@index([clockEntryId], name: "idx_clock_locations_clock_entry_id")
+  @@index([timestamp], name: "idx_clock_locations_timestamp")
+  @@map("clock_locations")
+}
+
+model RefreshToken {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  token             String    @unique
+  tokenVersion      Int       @default(1) @map("token_version")
+  familyId          String    @map("family_id")
+  deviceFingerprint String?   @map("device_fingerprint")
+  replacedByToken   String?   @map("replaced_by_token")
+  rotatedAt         DateTime? @map("rotated_at") @db.Timestamptz(6)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  isRevoked         Boolean   @default(false) @map("is_revoked")
+  deviceInfo        String?   @map("device_info")
+  ipAddress         String?   @map("ip_address")
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_refresh_tokens_user_id")
+  @@index([token], name: "idx_refresh_tokens_token")
+  @@index([expiresAt], name: "idx_refresh_tokens_expires_at")
+  @@index([userId, tokenVersion], name: "idx_refresh_tokens_user_version")
+  @@index([familyId], name: "idx_refresh_tokens_family_id")
+  @@map("refresh_tokens")
+}
+
+model TrustedDevice {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  deviceFingerprint String @map("device_fingerprint")
+  deviceName     String?  @map("device_name")
+  browser        String?
+  os             String?
+  lastIpAddress  String?  @map("last_ip_address") @db.VarChar(45)
+  lastUsedAt     DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceFingerprint], name: "trusted_devices_user_fingerprint_unique")
+  @@index([userId], name: "idx_trusted_devices_user_id")
+  @@map("trusted_devices")
+}
+
+model LoginHistory {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  ipAddress      String   @map("ip_address") @db.VarChar(45)
+  deviceInfo     String?  @map("device_info")
+  deviceFingerprint String? @map("device_fingerprint")
+  browser        String?
+  os             String?
+  city           String?
+  country        String?
+  isTrustedDevice Boolean @default(false) @map("is_trusted_device")
+  eventType      String   @map("event_type") // 'login', 'token_refresh', 'new_device', 'new_ip'
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_login_history_user_id")
+  @@index([userId, createdAt], name: "idx_login_history_user_created")
+  @@index([userId, eventType], name: "idx_login_history_user_event")
+  @@map("login_history")
+}
+
+model SecurityAlert {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  alertType      String   @map("alert_type") // 'new_device', 'new_location', 'suspicious_ip', 'multiple_failures'
+  message        String
+  metadata       Json?    // { ip, device, location, etc. }
+  isRead         Boolean  @default(false) @map("is_read")
+  isDismissed    Boolean  @default(false) @map("is_dismissed")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead], name: "idx_security_alerts_user_read")
+  @@index([userId, createdAt], name: "idx_security_alerts_user_created")
+  @@map("security_alerts")
+}
+
+model OtpCode {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone     String   @db.VarChar(20)
+  code      String   @db.VarChar(6)
+  purpose   String   @db.VarChar(20) // 'link_phone' | 'login'
+  userId    String?  @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  attempts  Int      @default(0)
+  isUsed    Boolean  @default(false) @map("is_used")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phone, purpose, isUsed])
+  @@map("otp_codes")
+}
+
+// ===== HR MODELS =====
+
+model HrAbsence {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyUserId String        @map("company_user_id") @db.Uuid
+  companyId     String        @map("company_id") @db.Uuid
+  type          AbsenceType
+  startDate     DateTime      @map("start_date") @db.Date
+  endDate       DateTime      @map("end_date") @db.Date
+  status        AbsenceStatus @default(PENDING)
+  reason        String?
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  companyUser CompanyUser @relation(fields: [companyUserId], references: [id], onDelete: Cascade)
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyUserId], name: "idx_hr_absences_company_user_id")
+  @@index([companyId], name: "idx_hr_absences_company_id")
+  @@index([status], name: "idx_hr_absences_status")
+  @@index([startDate, endDate], name: "idx_hr_absences_dates")
+  @@map("hr_absences")
+}
+
+model Document {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyUserId String       @map("company_user_id") @db.Uuid
+  companyId     String       @map("company_id") @db.Uuid
+  type          DocumentType
+  fileUrl       String       @map("file_url")
+  month         Int?
+  year          Int?
+  uploadedAt    DateTime     @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  companyUser CompanyUser @relation(fields: [companyUserId], references: [id], onDelete: Cascade)
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyUserId], name: "idx_documents_company_user_id")
+  @@index([companyId], name: "idx_documents_company_id")
+  @@index([type], name: "idx_documents_type")
+  @@index([year, month], name: "idx_documents_date")
+  @@map("documents")
+}
+
+model PettyCash {
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyUserId String           @map("company_user_id") @db.Uuid
+  companyId     String           @map("company_id") @db.Uuid
+  amount        Decimal          @db.Decimal(10, 2)
+  currency      String           @default("EUR") @db.VarChar(3)
+  date          DateTime         @db.Date
+  description   String
+  receiptUrl    String?          @map("receipt_url")
+  status        PettyCashStatus  @default(PENDING)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  companyUser CompanyUser @relation(fields: [companyUserId], references: [id], onDelete: Cascade)
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyUserId], name: "idx_petty_cash_company_user_id")
+  @@index([companyId], name: "idx_petty_cash_company_id")
+  @@index([status], name: "idx_petty_cash_status")
+  @@index([date], name: "idx_petty_cash_date")
+  @@map("petty_cash")
+}
